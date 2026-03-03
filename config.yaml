@@ -1,0 +1,28 @@
+plc:
+  path: "192.168.0.40"
+  cycle_time_ms: 100
+
+devices:
+  - name: "XV1301"
+    type: "motorized_valve"
+    open_time_sec: 15
+    close_time_sec: 15
+    io:
+      open_cmd:   { tag: "RCH04:1:O.Data", bit: 19, inverted: false, type: "output" }
+      close_cmd:  { tag: "RCH04:1:O.Data", bit: 18, inverted: false, type: "output" }
+      stop_cmd:   { tag: "RCH04:1:O.Data", bit: 20, inverted: false, type: "output" }
+      opened_fb:  { tag: "RCH03:2:I.Data", bit: 7,  inverted: false, type: "input" }
+      closed_fb:  { tag: "RCH03:2:I.Data", bit: 6,  inverted: false, type: "input" }
+      ready:      { tag: "RCH03:2:I.Data", bit: 11, inverted: false, type: "input" }
+
+  - name: "XV1302"
+    type: "motorized_valve"
+    open_time_sec: 15
+    close_time_sec: 15
+    io:
+      open_cmd:   { tag: "RCH04:1:O.Data", bit: 22, inverted: false, type: "output" }
+      close_cmd:  { tag: "RCH04:1:O.Data", bit: 21, inverted: false, type: "output" }
+      stop_cmd:   { tag: "RCH04:1:O.Data", bit: 23, inverted: false, type: "output" }
+      opened_fb:  { tag: "RCH03:2:I.Data", bit: 19,  inverted: false, type: "input" }
+      closed_fb:  { tag: "RCH03:2:I.Data", bit: 18,  inverted: false, type: "input" }
+      ready:      { tag: "RCH03:2:I.Data", bit: 23, inverted: false, type: "input" }
