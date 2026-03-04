@@ -10,46 +10,61 @@ import (
 	"time"
 
 	"plc-simulator/pkg/config"
-	"plc-simulator/pkg/devices"
+	"plc-simulator/pkg/field"
 	"plc-simulator/pkg/io"
 	"plc-simulator/pkg/plc"
+	"plc-simulator/pkg/scada"
 )
 
 func main() {
-	// Загружаем конфиг
 	cfg, err := config.Load("config.yaml")
 	if err != nil {
 		log.Fatal("Ошибка загрузки конфигурации:", err)
 	}
 
-	fmt.Printf("Конфигурация: PLC=%s, устройств=%d\n", cfg.PLC.Path, len(cfg.Devices))
+	fmt.Printf("Режим: %s, PLC: %s\n", cfg.Mode, cfg.PLC.Path)
 
-	// Подключаемся к PLC
 	client := plc.NewClient(cfg.PLC.Path)
 	if err := client.Connect(); err != nil {
 		log.Fatal("Ошибка подключения:", err)
 	}
 	defer client.Disconnect()
-	fmt.Println("✓ Подключено!")
+	fmt.Println("✓ Подключено к PLC")
 
-	// Создаём реестр и заполняем устройства из конфигурации
-	registry := devices.NewRegistry()
-
-	for _, devCfg := range cfg.Devices {
-		switch devCfg.Type {
-		case "motorized_valve":
-			valve := createValveFromConfig(client, devCfg)
-			registry.Add(valve)
-			fmt.Printf("  + %s (%ds/%ds)\n",
-				devCfg.Name, devCfg.OpenTimeSec, devCfg.CloseTimeSec)
-		default:
-			log.Printf("Неизвестный тип устройства: %s", devCfg.Type)
-		}
+	// Field Simulator (всегда)
+	fieldReg := field.NewRegistry()
+	for _, devCfg := range cfg.FieldDevices {
+		valve := createValveFromConfig(client, devCfg)
+		fieldReg.Add(valve)
+		fmt.Printf("  + Field: %s\n", devCfg.Name)
 	}
 
-	// Запускаем симуляцию
-	fmt.Println("Симуляция запущена. Ctrl+C для выхода")
+	// SCADA Simulator (если не field_only)
+	var scadaSim *scada.Simulator
+	if cfg.Mode != config.ModeOff {
+		scadaSim = scada.NewSimulator(scada.Mode(cfg.Mode))
+		for name, ioCfg := range cfg.SCADA.Commands {
+			scadaSim.Commands[name] = inputFromConfig(client, ioCfg)
+		}
+		fmt.Printf("  + SCADA: %d команд\n", len(scadaSim.Commands))
+	}
 
+	fmt.Println("Запуск. Ctrl+C для выхода")
+
+	// Тест: импульс reset для XV1301 (только в simulation)
+	if cfg.Mode == config.ModeSimulation {
+		go func() {
+			time.Sleep(2 * time.Second)
+			fmt.Println("\n[TEST] Импульс xv1301_scada_reset...")
+			if err := scadaSim.PulseCommand("xv1301_scada_reset", 3*time.Second); err != nil {
+				log.Printf("Ошибка: %v", err)
+			} else {
+				fmt.Println("[TEST] Импульс завершён")
+			}
+		}()
+	}
+
+	// Главный цикл
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -61,16 +76,7 @@ func main() {
 		cancel()
 	}()
 
-	// Горутина симуляции
-	go func() {
-		if err := registry.Run(ctx, cfg.CycleTime()); err != nil && err != context.Canceled {
-			log.Printf("Ошибка: %v", err)
-			cancel()
-		}
-	}()
-
-	// Вывод статуса
-	ticker := time.NewTicker(500 * time.Millisecond)
+	ticker := time.NewTicker(cfg.CycleTime())
 	defer ticker.Stop()
 
 	for {
@@ -78,42 +84,41 @@ func main() {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			fmt.Printf("\r%s", registry.Status())
+			if err := fieldReg.Update(cfg.CycleTime()); err != nil {
+				log.Printf("Field error: %v", err)
+			}
+			fmt.Printf("\r%s", fieldReg.Status())
 		}
 	}
 }
 
-// createValveFromConfig создаёт задвижку из конфигурации
-func createValveFromConfig(client *plc.Client, cfg config.DeviceConfig) *devices.MotorizedValve {
-	valve := devices.NewMotorizedValve(
+func createValveFromConfig(client *plc.Client, cfg config.DeviceConfig) *field.MotorizedValve {
+	valve := field.NewMotorizedValve(
 		cfg.Name,
 		time.Duration(cfg.OpenTimeSec)*time.Second,
 		time.Duration(cfg.CloseTimeSec)*time.Second,
 	)
-
-	// Привязываем IO из конфигурации
-	valve.OpenCmd = outputFromConfig(client, cfg.IO.OpenCmd)   // DO: читаем
-	valve.CloseCmd = outputFromConfig(client, cfg.IO.CloseCmd) // DO: читаем
-	valve.StopCmd = outputFromConfig(client, cfg.IO.StopCmd)   // DO: читаем
-	valve.OpenedFB = inputFromConfig(client, cfg.IO.OpenedFB)  // DI: пишем
-	valve.ClosedFB = inputFromConfig(client, cfg.IO.ClosedFB)  // DI: пишем
-	valve.Ready = inputFromConfig(client, cfg.IO.Ready)        // DI: пишем
-
+	valve.OpenCmd = outputFromConfig(client, cfg.IO.OpenCmd)
+	valve.CloseCmd = outputFromConfig(client, cfg.IO.CloseCmd)
+	valve.StopCmd = outputFromConfig(client, cfg.IO.StopCmd)
+	valve.OpenedFB = inputFromConfig(client, cfg.IO.OpenedFB)
+	valve.ClosedFB = inputFromConfig(client, cfg.IO.ClosedFB)
+	valve.Ready = inputFromConfig(client, cfg.IO.Ready)
 	return valve
 }
 
-// outputFromConfig создаёт DiscreteReader (читаем команду от PLC)
+// Для полевого оборудования: output = PLC пишет, мы читаем
 func outputFromConfig(client *plc.Client, cfg config.IOBit) io.DiscreteReader {
 	if cfg.Type != "output" {
-		log.Fatalf("Ожидался type=output для %s, got %s", cfg.Tag, cfg.Type)
+		log.Fatalf("Ожидался type=output, got %s", cfg.Type)
 	}
 	return io.NewDiscreteOutput(client, cfg.Tag, cfg.Bit, cfg.Inverted)
 }
 
-// inputFromConfig создаёт DiscreteWriter (пишем фидбек в PLC)
+// Для полевого оборудования: input = мы пишем, PLC читает
 func inputFromConfig(client *plc.Client, cfg config.IOBit) io.DiscreteWriter {
 	if cfg.Type != "input" {
-		log.Fatalf("Ожидался type=input для %s, got %s", cfg.Tag, cfg.Type)
+		log.Fatalf("Ожидался type=input, got %s", cfg.Type)
 	}
 	return io.NewDiscreteInput(client, cfg.Tag, cfg.Bit, cfg.Inverted)
 }

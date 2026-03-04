@@ -29,7 +29,7 @@ func (do *DiscreteOutput) Read() (bool, error) {
 	if err := do.client.Read(do.tag, &raw); err != nil {
 		return false, fmt.Errorf("read %s: %w", do.tag, err)
 	}
-	
+
 	val := plc.GetBit(raw, do.bit)
 	if do.inverted {
 		return !val, nil
@@ -60,20 +60,8 @@ func (di *DiscreteInput) Write(value bool) error {
 	if di.inverted {
 		value = !value
 	}
-	
-	// Читаем текущее значение
-	var raw int32
-	if err := di.client.Read(di.tag, &raw); err != nil {
-		return fmt.Errorf("read before write %s: %w", di.tag, err)
-	}
-	
-	// Модифицируем бит
-	newVal := plc.SetBitValue(raw, di.bit, value)
-	
-	// Пишем обратно
-	if err := di.client.Write(di.tag, newVal); err != nil {
-		return fmt.Errorf("write %s: %w", di.tag, err)
-	}
-	
-	return nil
+
+	// Пишем бит напрямую: "N68[227].0"
+	bitTag := fmt.Sprintf("%s.%d", di.tag, di.bit)
+	return di.client.Write(bitTag, value)
 }
