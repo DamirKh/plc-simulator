@@ -1,3 +1,4 @@
+// pkg/plc/bits.go
 package plc
 
 // GetBit извлекает бит из DINT

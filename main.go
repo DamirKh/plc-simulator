@@ -61,6 +61,12 @@ func main() {
 			} else {
 				fmt.Println("[TEST] Импульс завершён")
 			}
+			fmt.Println("\n[TEST] Импульс xv1302_scada_reset...")
+			if err := scadaSim.PulseCommand("xv1302_scada_reset", 3*time.Second); err != nil {
+				log.Printf("Ошибка: %v", err)
+			} else {
+				fmt.Println("[TEST] Импульс завершён")
+			}
 		}()
 	}
 
@@ -121,4 +127,20 @@ func inputFromConfig(client *plc.Client, cfg config.IOBit) io.DiscreteWriter {
 		log.Fatalf("Ожидался type=input, got %s", cfg.Type)
 	}
 	return io.NewDiscreteInput(client, cfg.Tag, cfg.Bit, cfg.Inverted)
+}
+
+// Булевы: читаем из PLC (выходы PLC)
+func boolOutputFromConfig(client *plc.Client, cfg config.IOBit) io.BoolReader {
+	if cfg.Type != "bool_output" {
+		log.Fatalf("Ожидался type=bool_output, got %s", cfg.Type)
+	}
+	return io.NewBoolReader(client, cfg.Tag)
+}
+
+// Булевы: пишем в PLC (входы PLC)
+func boolInputFromConfig(client *plc.Client, cfg config.IOBit) io.BoolWriter {
+	if cfg.Type != "bool_input" {
+		log.Fatalf("Ожидался type=bool_input, got %s", cfg.Type)
+	}
+	return io.NewBoolWriter(client, cfg.Tag)
 }

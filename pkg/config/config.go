@@ -18,9 +18,9 @@ const (
 
 type IOBit struct {
 	Tag      string `yaml:"tag"`
-	Bit      int    `yaml:"bit"`
+	Bit      int    `yaml:"bit"` // только для битовых типов
 	Inverted bool   `yaml:"inverted"`
-	Type     string `yaml:"type"`
+	Type     string `yaml:"type"` // "input", "output", "bool_input", "bool_output"
 }
 
 type ValveIO struct {
