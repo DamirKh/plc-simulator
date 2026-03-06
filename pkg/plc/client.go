@@ -60,3 +60,7 @@ func (c *Client) IsConnected() bool {
 func (c *Client) GetPath() string {
 	return c.path
 }
+
+func (c *Client) ReadMulti(data interface{}) error {
+	return c.driver.ReadMulti(data)
+}

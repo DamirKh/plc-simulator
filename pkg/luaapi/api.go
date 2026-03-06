@@ -38,12 +38,17 @@ func (s *State) Register(L *lua.LState) {
 	L.SetGlobal("log", L.NewFunction(s.log))
 }
 
-// Регистрация тега в кэше
 func (s *State) plcRegisterTag(L *lua.LState) int {
 	tag := L.CheckString(1)
-	s.Cache.RegisterTag(tag)
+
+	if err := s.Cache.RegisterTag(tag); err != nil {
+		L.Push(lua.LString(err.Error()))
+		return 1
+	}
+
 	log.Printf("[CACHE] Registered: %s", tag)
-	return 0
+	L.Push(lua.LNil)
+	return 1
 }
 
 // Быстрое чтение бита из кэша

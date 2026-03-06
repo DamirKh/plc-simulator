@@ -19,12 +19,19 @@ end
 -- Регистрация всех IO тегов в кэше (один раз при инициализации)
 function M.register_tags(valve)
     local io = valve.cfg.io
-    plc_register_tag(io.open_cmd.tag)
-    plc_register_tag(io.close_cmd.tag)
-    plc_register_tag(io.stop_cmd.tag)
-    plc_register_tag(io.opened_fb.tag)
-    plc_register_tag(io.closed_fb.tag)
-    plc_register_tag(io.ready.tag)
+    local tags = {
+        io.open_cmd.tag, io.close_cmd.tag, io.stop_cmd.tag,
+        io.opened_fb.tag, io.closed_fb.tag, io.ready.tag,
+    }
+    
+    for _, tag in ipairs(tags) do
+        local err = plc_register_tag(tag)
+        if err then
+            log("ERROR registering " .. tag .. ": " .. err)
+        else
+            log("Registered: " .. tag)
+        end
+    end
 end
 
 -- Чтение команд
