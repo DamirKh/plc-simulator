@@ -5,6 +5,7 @@ import (
 
 	"plc-simulator/pkg/luaapi"
 	"plc-simulator/pkg/plc"
+	"plc-simulator/pkg/web"
 
 	lua "github.com/yuin/gopher-lua"
 )
@@ -29,6 +30,10 @@ func main() {
 	// Регистрируем Go-функции
 	api := luaapi.NewState(client)
 	api.Register(L)
+
+	// Web сервер
+	ws := web.NewServer(api.Cache, client, "8080")
+	ws.Run()
 
 	// Запускаем main.lua
 	if err := L.DoFile("scripts/main.lua"); err != nil {

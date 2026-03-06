@@ -1,12 +1,20 @@
+-- scripts/main.lua
 local config = require("config.devices")
 local valve_sim = require("valve_sim")
 local scada_async = require("scada_async")
 
--- Инициализация задвижек
+local execution_time = 0
+
+-- Инициализация
 local valves = {
     xv1301 = valve_sim.new(config.devices.xv1301),
     xv1302 = valve_sim.new(config.devices.xv1302),
 }
+
+-- Регистрируем теги в кэше (один раз!)
+for name, valve in pairs(valves) do
+    valve_sim.register_tags(valve)
+end
 
 -- Создаём команды SCADA (аналог Scada_1b_Command)
 local cmd_xv1301_reset = scada_async.create_command(
@@ -33,6 +41,7 @@ log("=== Main Loop Started ===")
 local test_stage = 0
 
 while true do
+    local startTime = os.clock()
     timer = timer + dt
     
     -- === "Поток 1": Обновление задвижек (всегда!) ===
@@ -55,7 +64,11 @@ while true do
     -- Вывод статуса
     if (timer % 1000) < dt then
         log(valve_sim.status(valves.xv1301) .. " | " .. valve_sim.status(valves.xv1302))
+        log("Exec time = ".. execution_time)
     end
+
+    local endTime = os.clock()
+    execution_time = (execution_time + (endTime - startTime))/2
     
     sleep(dt)
 end

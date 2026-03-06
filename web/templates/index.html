@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>PLC Simulator</title>
+    <meta charset="utf-8">
+    <style>
+        body { font-family: monospace; margin: 20px; background: #1e1e1e; color: #d4d4d4; }
+        h1 { color: #4ec9b0; }
+        .section { background: #252526; padding: 15px; margin: 10px 0; border-radius: 5px; }
+        .metric { display: inline-block; margin: 10px 20px 10px 0; }
+        .label { color: #9cdcfe; }
+        .value { color: #ce9178; font-weight: bold; }
+        pre { background: #1e1e1e; padding: 10px; overflow-x: auto; }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { padding: 8px; text-align: left; border-bottom: 1px solid #3e3e42; }
+        th { color: #4ec9b0; }
+    </style>
+</head>
+<body>
+    <h1>🔧 PLC Simulator Diagnostics</h1>
+    
+    <div class="section">
+        <h2>System Status</h2>
+        <div id="status">Loading...</div>
+    </div>
+    
+    <div class="section">
+        <h2>Cache</h2>
+        <div id="cache">Loading...</div>
+    </div>
+    
+    <div class="section">
+        <h2>PLC Connection</h2>
+        <div id="plc">Loading...</div>
+    </div>
+
+    <script>
+        async function loadData() {
+            try {
+                const [status, cache, plc] = await Promise.all([
+                    fetch('/api/status').then(r => r.json()),
+                    fetch('/api/cache').then(r => r.json()),
+                    fetch('/api/plc').then(r => r.json())
+                ]);
+                
+                document.getElementById('status').innerHTML = `
+                    <div class="metric"><span class="label">Uptime:</span> <span class="value">${status.uptime}</span></div>
+                    <div class="metric"><span class="label">Goroutines:</span> <span class="value">${status.goroutines}</span></div>
+                    <div class="metric"><span class="label">Memory:</span> <span class="value">${status.memory_mb} MB</span></div>
+                    <div class="metric"><span class="label">GC Count:</span> <span class="value">${status.gc_count}</span></div>
+                `;
+                
+                document.getElementById('cache').innerHTML = `
+                    <div class="metric"><span class="label">Tags:</span> <span class="value">${cache.tags_count}</span></div>
+                    <pre>${JSON.stringify(cache.tags, null, 2)}</pre>
+                `;
+                
+                document.getElementById('plc').innerHTML = `
+                    <div class="metric"><span class="label">Connected:</span> <span class="value">${plc.connected ? '✅' : '❌'}</span></div>
+                    <div class="metric"><span class="label">IP:</span> <span class="value">${plc.controller_ip}</span></div>
+                    <div class="metric"><span class="label">Session:</span> <span class="value">${plc.session}</span></div>
+                `;
+            } catch(e) {
+                console.error('Error:', e);
+            }
+        }
+        
+        loadData();
+        setInterval(loadData, 1000);
+    </script>
+</body>
+</html>

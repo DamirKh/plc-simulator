@@ -16,6 +16,17 @@ function M.new(cfg)
     return valve
 end
 
+-- Регистрация всех IO тегов в кэше (один раз при инициализации)
+function M.register_tags(valve)
+    local io = valve.cfg.io
+    plc_register_tag(io.open_cmd.tag)
+    plc_register_tag(io.close_cmd.tag)
+    plc_register_tag(io.stop_cmd.tag)
+    plc_register_tag(io.opened_fb.tag)
+    plc_register_tag(io.closed_fb.tag)
+    plc_register_tag(io.ready.tag)
+end
+
 -- Чтение команд
 function M.read_commands(valve)
     local io = valve.cfg.io
