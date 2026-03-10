@@ -12,13 +12,32 @@ type TagInfo struct {
 	LastRead time.Time
 }
 
+// Metrics — метрики производительности
+type Metrics struct {
+	mu sync.RWMutex
+
+	// Время последнего цикла runUpdater
+	LastUpdaterDuration time.Duration
+	UpdaterTotalTime    time.Duration
+	UpdaterRuns         int64
+
+	// Время flushWriteQueue
+	LastFlushDuration time.Duration
+	FlushTotalTime    time.Duration
+	FlushRuns         int64
+
+	// Очередь записи
+	WriteQueueSize int
+}
+
 type Cache struct {
 	client     *Client
 	data       map[string]interface{}
 	mu         sync.RWMutex
 	tags       map[string]*TagInfo
-	writeQueue map[string]interface{} // очередь на запись
+	writeQueue map[string]interface{}
 	writeMu    sync.Mutex
+	metrics    Metrics
 }
 
 func NewCache(client *Client, updateInterval time.Duration) *Cache {
@@ -30,6 +49,26 @@ func NewCache(client *Client, updateInterval time.Duration) *Cache {
 	}
 	go c.runUpdater(updateInterval)
 	return c
+}
+
+// GetMetrics — доступ к метрикам для web API
+func (c *Cache) GetMetrics() Metrics {
+	c.metrics.mu.RLock()
+	defer c.metrics.mu.RUnlock()
+
+	c.writeMu.Lock()
+	queueSize := len(c.writeQueue)
+	c.writeMu.Unlock()
+
+	return Metrics{
+		LastUpdaterDuration: c.metrics.LastUpdaterDuration,
+		UpdaterTotalTime:    c.metrics.UpdaterTotalTime,
+		UpdaterRuns:         c.metrics.UpdaterRuns,
+		LastFlushDuration:   c.metrics.LastFlushDuration,
+		FlushTotalTime:      c.metrics.FlushTotalTime,
+		FlushRuns:           c.metrics.FlushRuns,
+		WriteQueueSize:      queueSize,
+	}
 }
 
 // RegisterTag с пробным чтением для определения типа
@@ -114,38 +153,64 @@ func (c *Cache) SetBit(tag string, bit int, value bool) error {
 	return nil
 }
 
-// runUpdater — фоновое чтение и запись
+// runUpdater — фоновое чтение и запись с метриками
 func (c *Cache) runUpdater(interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	for range ticker.C {
-		// 1. Обрабатываем очередь записи (в приоритете!)
+		start := time.Now()
+
+		// 1. Обрабатываем очередь записи
 		c.flushWriteQueue()
 
-		// 2. Читаем все зарегистрированные теги
+		// 2. Читаем все теги
 		c.readAllTags()
+
+		elapsed := time.Since(start)
+
+		// Обновляем метрики
+		c.metrics.mu.Lock()
+		c.metrics.LastUpdaterDuration = elapsed
+		c.metrics.UpdaterTotalTime += elapsed
+		c.metrics.UpdaterRuns++
+		c.metrics.mu.Unlock()
 	}
 }
 
-// flushWriteQueue — пишет накопленные изменения в PLC
+// flushWriteQueue — пишет накопленные изменения в PLC с метриками
 func (c *Cache) flushWriteQueue() {
 	c.writeMu.Lock()
 	queue := make(map[string]interface{}, len(c.writeQueue))
 	for k, v := range c.writeQueue {
 		queue[k] = v
 	}
-	c.writeQueue = make(map[string]interface{}) // очистка
+	c.writeQueue = make(map[string]interface{})
 	c.writeMu.Unlock()
+
+	if len(queue) == 0 {
+		return
+	}
+
+	start := time.Now()
 
 	for tag, val := range queue {
 		if err := c.client.Write(tag, val); err != nil {
-			// Возвращаем в очередь на повторную попытку?
+			// Возвращаем в очередь на повтор
 			c.writeMu.Lock()
 			c.writeQueue[tag] = val
 			c.writeMu.Unlock()
 		}
 	}
+
+	elapsed := time.Since(start)
+
+	// Обновляем метрики
+	c.metrics.mu.Lock()
+	c.metrics.LastFlushDuration = elapsed
+	c.metrics.FlushTotalTime += elapsed
+	c.metrics.FlushRuns++
+	c.metrics.mu.Unlock()
 }
 
 // readAllTags — батчевое чтение всех тегов

@@ -2,7 +2,6 @@
 <html>
 <head>
     <title>PLC Simulator</title>
-    <meta charset="utf-8">
     <style>
         body { font-family: monospace; margin: 20px; background: #1e1e1e; color: #d4d4d4; }
         h1 { color: #4ec9b0; }
@@ -10,18 +9,22 @@
         .metric { display: inline-block; margin: 10px 20px 10px 0; }
         .label { color: #9cdcfe; }
         .value { color: #ce9178; font-weight: bold; }
-        pre { background: #1e1e1e; padding: 10px; overflow-x: auto; }
-        table { border-collapse: collapse; width: 100%; }
-        th, td { padding: 8px; text-align: left; border-bottom: 1px solid #3e3e42; }
-        th { color: #4ec9b0; }
+        .sub-section { margin: 10px 0; padding: 10px; background: #1e1e1e; border-radius: 3px; }
+        h2 { color: #4ec9b0; margin-top: 0; }
+        h3 { color: #9cdcfe; }
     </style>
 </head>
 <body>
-    <h1>🔧 PLC Simulator Diagnostics</h1>
+    <h1>🔧 PLC Simulator</h1>
     
     <div class="section">
         <h2>System Status</h2>
         <div id="status">Loading...</div>
+    </div>
+    
+    <div class="section">
+        <h2>Performance Metrics</h2>
+        <div id="metrics">Loading...</div>
     </div>
     
     <div class="section">
@@ -35,38 +38,54 @@
     </div>
 
     <script>
-        async function loadData() {
+        async function load() {
             try {
-                const [status, cache, plc] = await Promise.all([
+                const [status, metrics, cache, plc] = await Promise.all([
                     fetch('/api/status').then(r => r.json()),
+                    fetch('/api/metrics').then(r => r.json()),
                     fetch('/api/cache').then(r => r.json()),
                     fetch('/api/plc').then(r => r.json())
                 ]);
                 
-                document.getElementById('status').innerHTML = `
-                    <div class="metric"><span class="label">Uptime:</span> <span class="value">${status.uptime}</span></div>
-                    <div class="metric"><span class="label">Goroutines:</span> <span class="value">${status.goroutines}</span></div>
-                    <div class="metric"><span class="label">Memory:</span> <span class="value">${status.memory_mb} MB</span></div>
-                    <div class="metric"><span class="label">GC Count:</span> <span class="value">${status.gc_count}</span></div>
-                `;
+                // Status
+                document.getElementById('status').innerHTML = 
+                    '<div class="metric"><span class="label">Uptime:</span> <span class="value">' + status.uptime + '</span></div>' +
+                    '<div class="metric"><span class="label">Goroutines:</span> <span class="value">' + status.goroutines + '</span></div>' +
+                    '<div class="metric"><span class="label">Memory:</span> <span class="value">' + status.memory_mb + ' MB</span></div>';
                 
-                document.getElementById('cache').innerHTML = `
-                    <div class="metric"><span class="label">Tags:</span> <span class="value">${cache.tags_count}</span></div>
-                    <pre>${JSON.stringify(cache.tags, null, 2)}</pre>
-                `;
+                // Metrics
+                document.getElementById('metrics').innerHTML = 
+                    '<div class="sub-section">' +
+                    '<h3>Updater (read + write)</h3>' +
+                    '<div class="metric"><span class="label">Last:</span> <span class="value">' + metrics.updater.last_ms + ' ms</span></div>' +
+                    '<div class="metric"><span class="label">Avg:</span> <span class="value">' + metrics.updater.avg_ms + ' ms</span></div>' +
+                    '<div class="metric"><span class="label">Runs:</span> <span class="value">' + metrics.updater.runs + '</span></div>' +
+                    '</div>' +
+                    '<div class="sub-section">' +
+                    '<h3>Flush Write Queue</h3>' +
+                    '<div class="metric"><span class="label">Last:</span> <span class="value">' + metrics.flush.last_ms + ' ms</span></div>' +
+                    '<div class="metric"><span class="label">Avg:</span> <span class="value">' + metrics.flush.avg_ms + ' ms</span></div>' +
+                    '<div class="metric"><span class="label">Runs:</span> <span class="value">' + metrics.flush.runs + '</span></div>' +
+                    '</div>' +
+                    '<div class="metric"><span class="label">Write Queue:</span> <span class="value">' + metrics.write_queue + '</span></div>';
                 
-                document.getElementById('plc').innerHTML = `
-                    <div class="metric"><span class="label">Connected:</span> <span class="value">${plc.connected ? '✅' : '❌'}</span></div>
-                    <div class="metric"><span class="label">IP:</span> <span class="value">${plc.controller_ip}</span></div>
-                    <div class="metric"><span class="label">Session:</span> <span class="value">${plc.session}</span></div>
-                `;
+                // Cache
+                document.getElementById('cache').innerHTML = 
+                    '<div class="metric"><span class="label">Tags:</span> <span class="value">' + cache.tags_count + '</span></div>' +
+                    '<pre>' + JSON.stringify(cache.tags, null, 2) + '</pre>';
+                
+                // PLC
+                document.getElementById('plc').innerHTML = 
+                    '<div class="metric"><span class="label">Connected:</span> <span class="value">' + (plc.connected ? '✅' : '❌') + '</span></div>' +
+                    '<div class="metric"><span class="label">IP:</span> <span class="value">' + plc.controller_ip + '</span></div>' +
+                    '<div class="metric"><span class="label">Session:</span> <span class="value">' + plc.session + '</span></div>';
             } catch(e) {
                 console.error('Error:', e);
             }
         }
         
-        loadData();
-        setInterval(loadData, 1000);
+        load();
+        setInterval(load, 1000);
     </script>
 </body>
 </html>

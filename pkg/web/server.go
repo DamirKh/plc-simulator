@@ -34,6 +34,7 @@ func (s *Server) Run() {
 	// API
 	r.GET("/api/status", s.handleStatus)
 	r.GET("/api/cache", s.handleCache)
+	r.GET("/api/metrics", s.handleMetrics) // ← новый endpoint
 	r.GET("/api/plc", s.handlePLC)
 	r.GET("/api/health", s.handleHealth)
 
@@ -47,6 +48,36 @@ func (s *Server) Run() {
 			fmt.Printf("Web error: %v\n", err)
 		}
 	}()
+}
+
+// handleMetrics — метрики производительности кэша
+func (s *Server) handleMetrics(c *gin.Context) {
+	m := s.cache.GetMetrics()
+
+	// Вычисляем средние значения
+	var avgUpdater, avgFlush time.Duration
+	if m.UpdaterRuns > 0 {
+		avgUpdater = m.UpdaterTotalTime / time.Duration(m.UpdaterRuns)
+	}
+	if m.FlushRuns > 0 {
+		avgFlush = m.FlushTotalTime / time.Duration(m.FlushRuns)
+	}
+
+	c.JSON(200, gin.H{
+		"updater": gin.H{
+			"last_ms":  m.LastUpdaterDuration.Milliseconds(),
+			"avg_ms":   avgUpdater.Milliseconds(),
+			"total_ms": m.UpdaterTotalTime.Milliseconds(),
+			"runs":     m.UpdaterRuns,
+		},
+		"flush": gin.H{
+			"last_ms":  m.LastFlushDuration.Milliseconds(),
+			"avg_ms":   avgFlush.Milliseconds(),
+			"total_ms": m.FlushTotalTime.Milliseconds(),
+			"runs":     m.FlushRuns,
+		},
+		"write_queue": m.WriteQueueSize,
+	})
 }
 
 func (s *Server) handleStatus(c *gin.Context) {
