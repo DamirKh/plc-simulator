@@ -6,38 +6,39 @@ import (
 	"time"
 )
 
-// TagInfo хранит информацию о теге
 type TagInfo struct {
 	Tag      string
-	TypeHint string // "int16", "int32", "bool" и т.д.
+	TypeHint string
 	LastRead time.Time
 }
 
 type Cache struct {
-	client *Client
-	data   map[string]interface{}
-	mu     sync.RWMutex
-	tags   map[string]*TagInfo // теперь храним инфо о теге
+	client     *Client
+	data       map[string]interface{}
+	mu         sync.RWMutex
+	tags       map[string]*TagInfo
+	writeQueue map[string]interface{} // очередь на запись
+	writeMu    sync.Mutex
 }
 
 func NewCache(client *Client, updateInterval time.Duration) *Cache {
 	c := &Cache{
-		client: client,
-		data:   make(map[string]interface{}),
-		tags:   make(map[string]*TagInfo),
+		client:     client,
+		data:       make(map[string]interface{}),
+		tags:       make(map[string]*TagInfo),
+		writeQueue: make(map[string]interface{}),
 	}
 	go c.runUpdater(updateInterval)
 	return c
 }
 
-// RegisterTag добавляет тег и определяет тип пробным чтением
+// RegisterTag с пробным чтением для определения типа
 func (c *Cache) RegisterTag(tag string) error {
-	// Пробное чтение с any для автоопределения типа
 	var raw any
 	if err := c.client.Read(tag, &raw); err != nil {
-		return fmt.Errorf("probe read failed for %s: %w", tag, err)
+		return fmt.Errorf("probe read failed: %w", err)
 	}
-	// Определяем тип
+
 	typeHint := c.detectType(raw)
 
 	c.mu.Lock()
@@ -45,14 +46,161 @@ func (c *Cache) RegisterTag(tag string) error {
 		Tag:      tag,
 		TypeHint: typeHint,
 	}
-	// Сразу сохраняем значение
 	c.data[tag] = raw
 	c.mu.Unlock()
 
 	return nil
 }
 
-// detectType определяет строковое представление типа
+// GetBit — быстрое чтение из кэша
+func (c *Cache) GetBit(tag string, bit int) (bool, error) {
+	c.mu.RLock()
+	val, ok := c.data[tag]
+	c.mu.RUnlock()
+
+	if !ok {
+		return false, fmt.Errorf("tag not in cache: %s", tag)
+	}
+
+	return c.extractBit(val, bit)
+}
+
+// SetBit — проверяет изменение, ставит в очередь на запись
+func (c *Cache) SetBit(tag string, bit int, value bool) error {
+	// Получаем инфо о теге
+	c.mu.RLock()
+	info, ok := c.tags[tag]
+	if !ok {
+		c.mu.RUnlock()
+		return fmt.Errorf("tag not registered: %s", tag)
+	}
+	cachedVal, hasCached := c.data[tag]
+	c.mu.RUnlock()
+
+	// Получаем текущее значение (из кэша или читаем)
+	var currentVal any
+	if hasCached {
+		currentVal = cachedVal
+	} else {
+		currentVal = c.createZero(info.TypeHint)
+		if err := c.client.Read(tag, &currentVal); err != nil {
+			return err
+		}
+	}
+
+	// Проверяем, изменился ли бит
+	currentBit, _ := c.extractBit(currentVal, bit)
+	if currentBit == value {
+		// Бит уже в нужном состоянии — не пишем в PLC!
+		return nil
+	}
+
+	// Модифицируем бит
+	newVal, err := c.setBitInValue(currentVal, bit, value)
+	if err != nil {
+		return err
+	}
+
+	// Обновляем кэш сразу (оптимистично)
+	c.mu.Lock()
+	c.data[tag] = newVal
+	c.mu.Unlock()
+
+	// Ставим в очередь на асинхронную запись в PLC
+	c.writeMu.Lock()
+	c.writeQueue[tag] = newVal
+	c.writeMu.Unlock()
+
+	return nil
+}
+
+// runUpdater — фоновое чтение и запись
+func (c *Cache) runUpdater(interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		// 1. Обрабатываем очередь записи (в приоритете!)
+		c.flushWriteQueue()
+
+		// 2. Читаем все зарегистрированные теги
+		c.readAllTags()
+	}
+}
+
+// flushWriteQueue — пишет накопленные изменения в PLC
+func (c *Cache) flushWriteQueue() {
+	c.writeMu.Lock()
+	queue := make(map[string]interface{}, len(c.writeQueue))
+	for k, v := range c.writeQueue {
+		queue[k] = v
+	}
+	c.writeQueue = make(map[string]interface{}) // очистка
+	c.writeMu.Unlock()
+
+	for tag, val := range queue {
+		if err := c.client.Write(tag, val); err != nil {
+			// Возвращаем в очередь на повторную попытку?
+			c.writeMu.Lock()
+			c.writeQueue[tag] = val
+			c.writeMu.Unlock()
+		}
+	}
+}
+
+// readAllTags — батчевое чтение всех тегов
+func (c *Cache) readAllTags() {
+	c.mu.RLock()
+	tags := make([]*TagInfo, 0, len(c.tags))
+	for _, info := range c.tags {
+		tags = append(tags, info)
+	}
+	c.mu.RUnlock()
+
+	if len(tags) == 0 {
+		return
+	}
+
+	// Формируем map для ReadMulti
+	readMap := make(map[string]any)
+	for _, info := range tags {
+		readMap[info.Tag] = c.createZero(info.TypeHint)
+	}
+
+	if err := c.client.ReadMulti(readMap); err != nil {
+		return // логируем
+	}
+
+	// Обновляем кэш (только если нет в очереди на запись — избегаем race)
+	c.writeMu.Lock()
+	pendingWrites := make(map[string]bool)
+	for tag := range c.writeQueue {
+		pendingWrites[tag] = true
+	}
+	c.writeMu.Unlock()
+
+	c.mu.Lock()
+	for tag, val := range readMap {
+		if !pendingWrites[tag] { // не перезаписываем то, что ещё не записали в PLC
+			c.data[tag] = val
+		}
+	}
+	c.mu.Unlock()
+}
+
+// GetAll — для web API
+func (c *Cache) GetAll() map[string]interface{} {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	result := make(map[string]interface{})
+	for k, v := range c.data {
+		result[k] = v
+	}
+	return result
+}
+
+// === helper методы ===
+
 func (c *Cache) detectType(val interface{}) string {
 	switch val.(type) {
 	case int16:
@@ -72,7 +220,6 @@ func (c *Cache) detectType(val interface{}) string {
 	}
 }
 
-// createZero создаёт нулевое значение нужного типа
 func (c *Cache) createZero(typeHint string) interface{} {
 	switch typeHint {
 	case "int16":
@@ -88,36 +235,11 @@ func (c *Cache) createZero(typeHint string) interface{} {
 	case "float32":
 		return float32(0)
 	default:
-		return int32(0) // fallback
+		return int32(0)
 	}
 }
 
-// Get читает из кэша (быстро!)
-func (c *Cache) Get(tag string) (interface{}, bool) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	val, ok := c.data[tag]
-	return val, ok
-}
-
-// GetAll возвращает копию всех данных
-func (c *Cache) GetAll() map[string]interface{} {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	result := make(map[string]interface{})
-	for k, v := range c.data {
-		result[k] = v
-	}
-	return result
-}
-
-// GetBit читает бит из кэшированного значения
-func (c *Cache) GetBit(tag string, bit int) (bool, error) {
-	val, ok := c.Get(tag)
-	if !ok {
-		return false, fmt.Errorf("tag not in cache: %s", tag)
-	}
-
+func (c *Cache) extractBit(val interface{}, bit int) (bool, error) {
 	var intVal int32
 	switch v := val.(type) {
 	case int16:
@@ -129,138 +251,38 @@ func (c *Cache) GetBit(tag string, bit int) (bool, error) {
 	case uint32:
 		intVal = int32(v)
 	default:
-		return false, fmt.Errorf("unsupported type %T for tag %s", val, tag)
+		return false, fmt.Errorf("unsupported type %T", val)
 	}
-
 	return ((intVal >> bit) & 1) == 1, nil
 }
 
-// SetBit модифицирует бит и пишет в PLC
-func (c *Cache) SetBit(tag string, bit int, value bool) error {
-	// Получаем инфо о теге (включая тип)
-	c.mu.RLock()
-	info, ok := c.tags[tag]
-	c.mu.RUnlock()
-
-	if !ok {
-		return fmt.Errorf("tag not registered: %s", tag)
-	}
-
-	// Используем info.TypeHint для проверки
-	_ = info.TypeHint // или убрать переменную info
-
-	// Читаем актуальное значение из кэша или PLC
-	var raw any
-	var err error
-
-	c.mu.RLock()
-	cachedVal, hasCached := c.data[tag]
-	c.mu.RUnlock()
-
-	if hasCached {
-		raw = cachedVal
-	} else {
-		if err = c.client.Read(tag, &raw); err != nil {
-			return err
-		}
-	}
-
-	// Модифицируем бит с учётом реального типа
-	var newVal interface{}
-
-	switch v := raw.(type) {
+func (c *Cache) setBitInValue(val interface{}, bit int, set bool) (interface{}, error) {
+	switch v := val.(type) {
 	case int16:
-		val := v
-		if value {
-			val |= int16(1 << bit)
-		} else {
-			val &^= int16(1 << bit)
+		mask := int16(1 << bit)
+		if set {
+			return v | mask, nil
 		}
-		newVal = val
-
+		return v &^ mask, nil
 	case int32:
-		val := v
-		if value {
-			val |= (1 << bit)
-		} else {
-			val &^= (1 << bit)
+		mask := int32(1 << bit)
+		if set {
+			return v | mask, nil
 		}
-		newVal = val
-
+		return v &^ mask, nil
 	case uint16:
-		val := v
-		if value {
-			val |= uint16(1 << bit)
-		} else {
-			val &^= uint16(1 << bit)
+		mask := uint16(1 << bit)
+		if set {
+			return v | mask, nil
 		}
-		newVal = val
-
+		return v &^ mask, nil
 	case uint32:
-		val := v
-		if value {
-			val |= uint32(1 << bit)
-		} else {
-			val &^= uint32(1 << bit)
+		mask := uint32(1 << bit)
+		if set {
+			return v | mask, nil
 		}
-		newVal = val
-
+		return v &^ mask, nil
 	default:
-		return fmt.Errorf("unsupported type %T for tag %s", raw, tag)
+		return nil, fmt.Errorf("unsupported type %T", val)
 	}
-
-	// Пишем с правильным типом!
-	if err := c.client.Write(tag, newVal); err != nil {
-		return err
-	}
-
-	// Обновляем кэш
-	c.mu.Lock()
-	c.data[tag] = newVal
-	c.mu.Unlock()
-
-	return nil
-}
-
-// Фоновое обновление через ReadMulti
-func (c *Cache) runUpdater(interval time.Duration) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	for range ticker.C {
-		c.mu.RLock()
-		tags := make([]*TagInfo, 0, len(c.tags))
-		for _, info := range c.tags {
-			tags = append(tags, info)
-		}
-		c.mu.RUnlock()
-
-		if len(tags) == 0 {
-			continue
-		}
-
-		// Создаём map с правильными типами
-		readMap := make(map[string]any)
-		for _, info := range tags {
-			readMap[info.Tag] = c.createZero(info.TypeHint)
-		}
-
-		// Один запрос!
-		if err := c.client.ReadMulti(readMap); err != nil {
-			continue // логируем ошибку
-		}
-
-		// Обновляем кэш
-		c.mu.Lock()
-		for tag, val := range readMap {
-			c.data[tag] = val
-		}
-		c.mu.Unlock()
-	}
-}
-
-// guessType определяет тип по имени тега
-func (c *Cache) guessType(tag string) interface{} {
-	// По умолчанию DINT
-	return int32(0)
 }
