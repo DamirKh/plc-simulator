@@ -1,1 +1,4 @@
 plc-test
+/.idea/
+go.sum
+plc-simulator
