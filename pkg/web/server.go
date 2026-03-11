@@ -88,7 +88,7 @@ func (s *Server) handleStatus(c *gin.Context) {
 	c.JSON(200, gin.H{
 		"uptime":     time.Since(s.startTime).Round(time.Second).String(),
 		"goroutines": runtime.NumGoroutine(),
-		"memory_mb":  m.Alloc / 1024 / 1024,
+		"memory_kb":  m.Alloc / 1024,
 		"gc_count":   m.NumGC,
 	})
 }

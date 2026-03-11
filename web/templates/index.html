@@ -51,7 +51,7 @@
                 document.getElementById('status').innerHTML = 
                     '<div class="metric"><span class="label">Uptime:</span> <span class="value">' + status.uptime + '</span></div>' +
                     '<div class="metric"><span class="label">Goroutines:</span> <span class="value">' + status.goroutines + '</span></div>' +
-                    '<div class="metric"><span class="label">Memory:</span> <span class="value">' + status.memory_mb + ' MB</span></div>';
+                    '<div class="metric"><span class="label">Memory:</span> <span class="value">' + status.memory_kb + ' KB</span></div>';
                 
                 // Metrics - с утилизацией
                 const utilPercent = (metrics.updater.utilization * 100).toFixed(1);
