@@ -28,24 +28,28 @@ type Metrics struct {
 
 	// Очередь записи
 	WriteQueueSize int
+
+	UpdateIntervalUtilization float64 // Added field for utilization
 }
 
 type Cache struct {
-	client     *Client
-	data       map[string]interface{}
-	mu         sync.RWMutex
-	tags       map[string]*TagInfo
-	writeQueue map[string]interface{}
-	writeMu    sync.Mutex
-	metrics    Metrics
+	client         *Client
+	data           map[string]interface{}
+	mu             sync.RWMutex
+	tags           map[string]*TagInfo
+	writeQueue     map[string]interface{}
+	writeMu        sync.Mutex
+	metrics        Metrics
+	updateInterval time.Duration // Added field for update interval
 }
 
 func NewCache(client *Client, updateInterval time.Duration) *Cache {
 	c := &Cache{
-		client:     client,
-		data:       make(map[string]interface{}),
-		tags:       make(map[string]*TagInfo),
-		writeQueue: make(map[string]interface{}),
+		client:         client,
+		data:           make(map[string]interface{}),
+		tags:           make(map[string]*TagInfo),
+		writeQueue:     make(map[string]interface{}),
+		updateInterval: updateInterval, // Store updateInterval
 	}
 	go c.runUpdater(updateInterval)
 	return c
@@ -60,14 +64,20 @@ func (c *Cache) GetMetrics() Metrics {
 	queueSize := len(c.writeQueue)
 	c.writeMu.Unlock()
 
+	utilization := float64(c.metrics.LastUpdaterDuration) / float64(c.updateInterval)
+	if utilization > 1.0 {
+		utilization = 1.0 // макс 100%
+	}
+
 	return Metrics{
-		LastUpdaterDuration: c.metrics.LastUpdaterDuration,
-		UpdaterTotalTime:    c.metrics.UpdaterTotalTime,
-		UpdaterRuns:         c.metrics.UpdaterRuns,
-		LastFlushDuration:   c.metrics.LastFlushDuration,
-		FlushTotalTime:      c.metrics.FlushTotalTime,
-		FlushRuns:           c.metrics.FlushRuns,
-		WriteQueueSize:      queueSize,
+		LastUpdaterDuration:       c.metrics.LastUpdaterDuration,
+		UpdaterTotalTime:          c.metrics.UpdaterTotalTime,
+		UpdaterRuns:               c.metrics.UpdaterRuns,
+		LastFlushDuration:         c.metrics.LastFlushDuration,
+		FlushTotalTime:            c.metrics.FlushTotalTime,
+		FlushRuns:                 c.metrics.FlushRuns,
+		WriteQueueSize:            queueSize,
+		UpdateIntervalUtilization: utilization,
 	}
 }
 

@@ -19,7 +19,7 @@ return {
                 ready      = {tag = "RCH03:2:I.Data", bit = 11, type = "input"},
             },
         },
-        
+
         xv1302 = {
             name = "XV1302",
             type = "motorized_valve",
@@ -37,13 +37,13 @@ return {
             },
         },
     },
-    
+
     scada = {
         commands = {
             xv1301_reset = {tag = "N68[227]", bit = 0, type = "input"},
             xv1302_reset = {tag = "N68[227]", bit = 1, type = "input"},
         },
-        
+
         statuses = {
             system_ready = {tag = "N68[228]", bit = 0, type = "output"},
         },

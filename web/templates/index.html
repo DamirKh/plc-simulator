@@ -53,13 +53,17 @@
                     '<div class="metric"><span class="label">Goroutines:</span> <span class="value">' + status.goroutines + '</span></div>' +
                     '<div class="metric"><span class="label">Memory:</span> <span class="value">' + status.memory_mb + ' MB</span></div>';
                 
-                // Metrics
+                // Metrics - с утилизацией
+                const utilPercent = (metrics.updater.utilization * 100).toFixed(1);
+                const utilColor = metrics.updater.utilization > 0.8 ? '#ff6b6b' : (metrics.updater.utilization > 0.5 ? '#ffd93d' : '#6bcf7f');
+                
                 document.getElementById('metrics').innerHTML = 
                     '<div class="sub-section">' +
                     '<h3>Updater (read + write)</h3>' +
                     '<div class="metric"><span class="label">Last:</span> <span class="value">' + metrics.updater.last_ms + ' ms</span></div>' +
                     '<div class="metric"><span class="label">Avg:</span> <span class="value">' + metrics.updater.avg_ms + ' ms</span></div>' +
                     '<div class="metric"><span class="label">Runs:</span> <span class="value">' + metrics.updater.runs + '</span></div>' +
+                    '<div class="metric"><span class="label">Utilization:</span> <span class="value" style="color: ' + utilColor + '">' + utilPercent + '%</span></div>' +
                     '</div>' +
                     '<div class="sub-section">' +
                     '<h3>Flush Write Queue</h3>' +

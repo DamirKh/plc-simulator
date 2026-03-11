@@ -65,10 +65,11 @@ func (s *Server) handleMetrics(c *gin.Context) {
 
 	c.JSON(200, gin.H{
 		"updater": gin.H{
-			"last_ms":  m.LastUpdaterDuration.Milliseconds(),
-			"avg_ms":   avgUpdater.Milliseconds(),
-			"total_ms": m.UpdaterTotalTime.Milliseconds(),
-			"runs":     m.UpdaterRuns,
+			"last_ms":     m.LastUpdaterDuration.Milliseconds(),
+			"avg_ms":      avgUpdater.Milliseconds(),
+			"total_ms":    m.UpdaterTotalTime.Milliseconds(),
+			"runs":        m.UpdaterRuns,
+			"utilization": m.UpdateIntervalUtilization, // новое поле
 		},
 		"flush": gin.H{
 			"last_ms":  m.LastFlushDuration.Milliseconds(),
